@@ -1,177 +1,610 @@
-<!DOCTYPE html>
-<html lang="ko">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>인천소방본부 상황판 App</title>
-    
-    <!-- Tailwind CSS (스타일링) -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    
-    <!-- Import Map: react/jsx-runtime 모듈 에러를 완벽하게 해결하기 위한 ES Module 매핑 -->
-    <script type="importmap">
-    {
-        "imports": {
-            "react": "https://esm.sh/react@18",
-            "react-dom/client": "https://esm.sh/react-dom@18/client",
-            "react/jsx-runtime": "https://esm.sh/react@18/jsx-runtime"
-        }
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import React, { useState, useEffect } from 'react';
+import { 
+  Home as HomeIcon, 
+  Video as VideoIcon, 
+  BookOpen as BookOpenIcon, 
+  Tv as TvIcon,
+  Flame, 
+  ShieldAlert, 
+  Activity, 
+  Heart, 
+  Search, 
+  Menu, 
+  ChevronRight, 
+  PhoneCall, 
+  Clock, 
+  AlertCircle,
+  HelpCircle,
+  PlayCircle
+} from 'lucide-react';
+import { INCHEON_REGIONS, INITIAL_INCIDENTS, Incident, RegionData, SAFETY_QUICK_GUIDES } from './types';
+import CPRManager from './components/CPRManager';
+import SafetyQuiz from './components/SafetyQuiz';
+import FieldSupport from './components/FieldSupport';
+
+export default function App() {
+  const [activeTab, setActiveTab] = useState<'home' | 'support' | 'safety' | 'quiz'>('home');
+  const [selectedRegionId, setSelectedRegionId] = useState<string>('all');
+  const [incidents, setIncidents] = useState<Incident[]>(INITIAL_INCIDENTS);
+  const [regionStats, setRegionStats] = useState<RegionData[]>(INCHEON_REGIONS);
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [filterType, setFilterType] = useState<string>('all');
+  const [currentTime, setCurrentTime] = useState<Date>(new Date());
+  
+  // Active dynamic alerts ticker
+  const [tickerIncident, setTickerIncident] = useState<string>('서구 가좌동 상가 주방 화재 진압 및 잔불 정리 중');
+  
+  // Dynamic clock tick
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const formatDateString = (date: Date) => {
+    const year = date.getFullYear();
+    const month = date.getMonth() + 1;
+    const day = date.getDate();
+    const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
+    const dayName = dayNames[date.getDay()];
+    return `${year}년 ${month}월 ${day}일 (${dayName})`;
+  };
+
+  const formatTimeString = (date: Date) => {
+    const hours = date.getHours().toString().padStart(2, '0');
+    const minutes = date.getMinutes().toString().padStart(2, '0');
+    const seconds = date.getSeconds().toString().padStart(2, '0');
+    return `${hours}:${minutes}:${seconds}`;
+  };
+  
+  // Rotating live alert ticker
+  useEffect(() => {
+    const activeIncidents = incidents.filter(i => i.status !== '완료');
+    if (activeIncidents.length > 0) {
+      let idx = 0;
+      const interval = setInterval(() => {
+        idx = (idx + 1) % activeIncidents.length;
+        setTickerIncident(`${activeIncidents[idx].regionName} ${activeIncidents[idx].title} - [${activeIncidents[idx].status}]`);
+      }, 5000);
+      return () => clearInterval(interval);
     }
-    </script>
+  }, [incidents]);
+
+  // Handle addition of a reported incident
+  const handleAddNewIncident = (newIncidentData: Omit<Incident, 'id' | 'time'>) => {
+    const now = new Date();
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    const timeStr = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
     
-    <!-- Babel (브라우저에서 React 코드를 해석해주는 컴파일러) -->
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    const newIncident: Incident = {
+      ...newIncidentData,
+      id: `inc-${Date.now()}`,
+      time: timeStr
+    };
 
-    <!-- 사용자 정의 스타일 (애니메이션 및 스크롤바 숨김) -->
-    <style>
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(5px); }
-            to { opacity: 1; transform: translateY(0); }
+    setIncidents((prev) => [newIncident, ...prev]);
+
+    // Dynamically increment stats for the region
+    setRegionStats((prev) => 
+      prev.map((reg) => {
+        if (reg.id === newIncidentData.regionId) {
+          return {
+            ...reg,
+            [newIncidentData.type]: reg[newIncidentData.type] + 1
+          };
         }
-        .animate-fade-in {
-            animation: fadeIn 0.3s ease-out forwards;
-        }
-        .hide-scrollbar::-webkit-scrollbar {
-            display: none;
-        }
-        .hide-scrollbar {
-            -ms-overflow-style: none;
-            scrollbar-width: none;
-        }
-        .pb-safe {
-            padding-bottom: env(safe-area-inset-bottom);
-        }
-    </style>
-</head>
-<body class="bg-gray-900 m-0 p-0 overflow-hidden">
-    <!-- 앱이 렌더링될 메인 영역 -->
-    <div id="root"></div>
+        return reg;
+      })
+    );
+  };
 
-    <script type="text/babel" data-type="module">
-        import React, { useState } from 'react';
-        import { createRoot } from 'react-dom/client';
+  // Compute grand cumulative total stats across all districts
+  const grandTotalStats = regionStats.reduce(
+    (acc, cur) => {
+      acc.fire += cur.fire;
+      acc.rescue += cur.rescue;
+      acc.ems += cur.ems;
+      return acc;
+    },
+    { fire: 0, rescue: 0, ems: 0 }
+  );
 
-        // 아이콘 컴포넌트 직접 정의
-        const Home = ({ className }) => <svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>;
-        const Video = ({ className }) => <svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect x="2" y="6" width="14" height="12" rx="2" ry="2"/></svg>;
-        const BookOpen = ({ className }) => <svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>;
-        const Youtube = ({ className }) => <svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2.5 17a24.12 24.12 0 0 1 0-10 2 2 0 0 1 1.4-1.4 49.56 49.56 0 0 1 16.2 0A2 2 0 0 1 21.5 7a24.12 24.12 0 0 1 0 10 2 2 0 0 1-1.4 1.4 49.55 49.55 0 0 1-16.2 0A2 2 0 0 1 2.5 17"/><path d="m10 15 5-3-5-3z"/></svg>;
-        const Menu = ({ className }) => <svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></svg>;
-        const ChevronRight = ({ className }) => <svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>;
+  // Compute the current chosen district context data
+  const currentRegionContext = selectedRegionId === 'all'
+    ? { name: '인천광역시 전체', fire: grandTotalStats.fire, rescue: grandTotalStats.rescue, ems: grandTotalStats.ems, phone: '032-870-3119' }
+    : regionStats.find(r => r.id === selectedRegionId) || regionStats[0];
 
-        const FlameIcon = ({ className }) => <svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>;
-        const ActivityIcon = ({ className }) => <svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>;
-        const HeartIcon = ({ className }) => <svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>;
+  // Filtering incidents for the local dashboard timeline
+  const filteredIncidents = incidents.filter((inc) => {
+    const matchesRegion = selectedRegionId === 'all' || inc.regionId === selectedRegionId;
+    const matchesKeyword = 
+      inc.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
+      inc.location.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      inc.description.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesType = filterType === 'all' || inc.type === filterType;
 
-        const INCHEON_REGIONS = [
-            { id: 'all', name: '전체', fire: 0, rescue: 0, ems: 0 },
-            { id: 'ganghwa', name: '강화군', fire: 2, rescue: 4, ems: 18 },
-            { id: 'seo', name: '서구', fire: 4, rescue: 15, ems: 62 },
-            { id: 'gyeyang', name: '계양구', fire: 1, rescue: 7, ems: 31 },
-            { id: 'bupyeong', name: '부평구', fire: 2, rescue: 10, ems: 48 },
-            { id: 'namdong', name: '남동구', fire: 3, rescue: 12, ems: 55 },
-            { id: 'michuhol', name: '미추홀구', fire: 2, rescue: 8, ems: 42 },
-            { id: 'yeonsu', name: '연수구', fire: 1, rescue: 6, ems: 38 },
-            { id: 'jung', name: '중구', fire: 0, rescue: 2, ems: 15 },
-            { id: 'jung-yeongjong', name: '중구(영종)', fire: 1, rescue: 5, ems: 24 },
-            { id: 'ongjin', name: '옹진군', fire: 0, rescue: 1, ems: 5 },
-        ];
+    return matchesRegion && matchesKeyword && matchesType;
+  });
 
-        function IncheonFireApp() {
-            const [activeTab, setActiveTab] = useState('home');
-            const [selectedRegionId, setSelectedRegionId] = useState('all');
+  return (
+    <div 
+      className="min-h-screen flex items-center justify-center p-0 sm:p-5 font-sans relative"
+      style={{
+        backgroundImage: `url('https://images.unsplash.com/photo-1627503460670-65239e2d3122?auto=format&fit=crop&w=2000&q=80')`,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundAttachment: 'fixed'
+      }}
+      id="app-container"
+    >
+      {/* Background layer ambient blur filter */}
+      <div className="absolute inset-0 bg-black/60 bg-gradient-to-br from-[#0f285c]/85 via-black/50 to-[#e41e26]/35 backdrop-blur-[3px] pointer-events-none"></div>
 
-            const totalStats = INCHEON_REGIONS.reduce((acc, region) => {
-                if (region.id !== 'all') {
-                    acc.fire += region.fire;
-                    acc.rescue += region.rescue;
-                    acc.ems += region.ems;
-                }
-                return acc;
-            }, { fire: 0, rescue: 0, ems: 0 });
+      {/* Styled Phone Frame Container Mockup */}
+      <div className="w-full h-screen sm:h-[842px] max-w-[390px] bg-slate-50 flex flex-col relative sm:rounded-[2.5rem] sm:border-[10px] border-slate-900 shadow-[0_32px_100px_rgba(15,40,92,0.35)] overflow-hidden ring-4 ring-white/15 z-10">
+        
+        {/* Device Status Bar Decor */}
+        <div className="hidden sm:block absolute top-0 left-1/2 -translate-x-1/2 w-36 h-4.5 bg-slate-900 rounded-b-2xl z-50"></div>
 
-            const currentRegionData = selectedRegionId === 'all' 
-                ? { name: '전체', ...totalStats }
-                : INCHEON_REGIONS.find(r => r.id === selectedRegionId);
+        {/* Brand App Header (Navy styling from Professional Polish) */}
+        <header className="bg-[#0f285c] text-white px-4 py-3.5 flex items-center justify-between relative z-15 border-b border-[#0f285c]/45 shadow-lg shrink-0">
+          <div className="flex items-center space-x-2">
+            <div className="w-9 h-9 rounded-full bg-white flex items-center justify-center text-[#e41e26] shadow-md">
+              <Flame className="w-5 h-5 animate-pulse" />
+            </div>
+            <div>
+              <h1 className="text-[13px] font-black text-white tracking-tight flex items-center">
+                인천소방본부
+                <span className="ml-1.5 w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
+              </h1>
+              <p className="text-[9px] text-blue-200/85 font-extrabold tracking-widest leading-none uppercase">119 Dispatcher Center</p>
+            </div>
+          </div>
+          <div className="flex items-center space-x-1">
+            <span className="px-1.5 py-0.5 bg-emerald-500 rounded text-[8px] font-black text-white">망원활</span>
+            <span className="px-1.5 py-0.5 bg-[#e41e26] rounded text-[8px] font-black text-white animate-pulse">
+              관할 {incidents.filter(i => i.status !== '완료').length}건
+            </span>
+          </div>
+        </header>
 
-            return (
-                <div 
-                    className="min-h-screen flex items-center justify-center p-0 sm:p-6 font-sans relative bg-gray-900"
-                    style={{
-                        backgroundImage: `url('https://images.unsplash.com/photo-1627503460670-65239e2d3122?auto=format&fit=crop&w=2000&q=80')`,
-                        backgroundSize: 'cover',
-                        backgroundPosition: 'center',
-                        backgroundAttachment: 'fixed'
-                    }}
-                >
-                    <div className="absolute inset-0 bg-black/50 bg-gradient-to-br from-[#0f285c]/80 via-black/40 to-[#e41e26]/40 backdrop-blur-[2px]"></div>
+        {/* Siren Alert Flash Ticker Bar */}
+        <div className="bg-[#e41e26] text-white py-1.5 px-3.5 flex items-center space-x-2 overflow-hidden select-none shrink-0 border-b border-red-700">
+          <ShieldAlert className="w-4 h-4 shrink-0 text-yellow-300 animate-bounce" />
+          <div className="w-full text-[10px] font-extrabold tracking-tight overflow-hidden text-ellipsis whitespace-nowrap">
+            <span className="text-yellow-200 mr-1.5 font-black">[긴급 속보]</span> 
+            {tickerIncident}
+          </div>
+        </div>
 
-                    <div className="w-full h-screen sm:h-[842px] max-w-[390px] bg-white/95 backdrop-blur-2xl flex flex-col relative sm:rounded-[2.5rem] sm:border-[6px] border-gray-800 shadow-[0_20px_60px_rgba(0,0,0,0.7)] overflow-hidden ring-1 ring-white/20 z-10">
-                        <header className="bg-white/80 backdrop-blur-md px-4 py-3 flex items-center justify-between relative z-10 border-b border-gray-100">
-                            <div className="flex items-center space-x-2">
-                                <img src={encodeURI("인천소방본부(심벌마크).png")} alt="인천소방 로고" className="w-9 h-9 object-contain drop-shadow-sm" onError={(e) => { e.target.style.display = 'none'; }}/>
-                                <h1 className="text-lg font-black text-gray-900 tracking-tight">인천소방본부</h1>
-                            </div>
-                            <button className="p-1.5 rounded-full hover:bg-gray-100 transition-colors"><Menu className="w-6 h-6 text-gray-800" /></button>
-                        </header>
-
-                        <main className="flex-1 overflow-y-auto hide-scrollbar bg-gray-50/50 pb-6">
-                            {activeTab === 'home' && (
-                                <div className="animate-fade-in">
-                                    <div className="bg-gradient-to-r from-[#0f285c] via-[#1a408b] to-[#0f285c] px-5 py-7 text-white shadow-inner relative overflow-hidden">
-                                        <h2 className="text-xl font-black mb-1.5 tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-white to-blue-100">인천시민의 안전을 지킵니다</h2>
-                                    </div>
-                                    <section className="px-4 py-6 mt-[-15px] bg-white rounded-t-3xl relative shadow-[0_-4px_15px_rgba(0,0,0,0.05)] flex flex-col space-y-6">
-                                        <div>
-                                            <h2 className="text-lg font-black text-gray-900 tracking-tight flex items-center"><span className="w-1.5 h-4 bg-[#e41e26] mr-2 rounded-sm"></span>인천 재난현황</h2>
-                                            <p className="text-[11px] text-gray-500 mt-1 ml-3.5 font-medium">버튼을 탭하여 지역별 통계를 확인하세요.</p>
-                                        </div>
-                                        <div className="grid grid-cols-4 gap-2">
-                                            {INCHEON_REGIONS.map((region) => (
-                                                <button key={region.id} onClick={() => setSelectedRegionId(region.id)} className={`py-2.5 text-[11px] font-bold border rounded-xl transition-all duration-200 ${selectedRegionId === region.id ? 'border-[#0f285c] text-white bg-gradient-to-b from-[#1a408b] to-[#0f285c] shadow-md transform scale-105' : 'border-gray-200 text-gray-600 bg-white hover:bg-gray-50 active:scale-95'}`}>{region.name}</button>
-                                            ))}
-                                        </div>
-                                        <div className="w-full pt-2">
-                                            <div className="bg-gray-50 rounded-2xl border border-gray-100 overflow-hidden shadow-sm">
-                                                <h3 className="text-sm font-black text-center text-gray-800 py-3 bg-gray-100/80 border-b border-gray-200">{currentRegionData.name === '전체' ? '인천 전체 통계' : `${currentRegionData.name} 통계`}</h3>
-                                                <table className="w-full text-center border-collapse bg-white">
-                                                    <tbody>
-                                                        <tr className="border-b border-gray-50"><td className="py-3.5 border-r border-gray-50 text-sm font-medium text-gray-700">화재출동</td><td className="py-3.5 font-black">{currentRegionData.fire}</td></tr>
-                                                        <tr className="border-b border-gray-50"><td className="py-3.5 border-r border-gray-50 text-sm font-medium text-gray-700">구조출동</td><td className="py-3.5 font-black">{currentRegionData.rescue}</td></tr>
-                                                        <tr><td className="py-3.5 border-r border-gray-50 text-sm font-medium text-gray-700">구급출동</td><td className="py-3.5 font-black">{currentRegionData.ems}</td></tr>
-                                                    </tbody>
-                                                </table>
-                                            </div>
-                                        </div>
-                                        <button onClick={() => window.open('https://www.incheon.go.kr/119/NE030201', '_blank')} className="w-full bg-[#0f285c] hover:bg-[#0a1b3f] text-white py-4 rounded-xl font-bold transition-colors flex items-center justify-center mt-2 text-sm group">일일종합상황 상세 보기 <ChevronRight className="w-4 h-4 ml-1" /></button>
-                                    </section>
-                                </div>
-                            )}
-                            {activeTab === 'safety' && (
-                                <div className="animate-fade-in px-4 py-6">
-                                    <h2 className="text-xl font-black mb-6">시민 안전수칙</h2>
-                                    <div className="bg-white rounded-2xl p-4 shadow-sm mb-4 border border-gray-100"><h3 className="font-bold mb-2 flex items-center"><FlameIcon className="w-5 h-5 mr-2 text-red-500" /> 화재 대피</h3><p className="text-xs text-gray-600">젖은 수건으로 코/입을 막고 낮은 자세로 계단을 이용해 대피하세요.</p></div>
-                                    <div className="bg-white rounded-2xl p-4 shadow-sm mb-4 border border-gray-100"><h3 className="font-bold mb-2 flex items-center"><ActivityIcon className="w-5 h-5 mr-2 text-amber-500" /> 지진 대피</h3><p className="text-xs text-gray-600">탁자 아래로 들어가 몸을 보호하고 흔들림이 멈추면 야외로 이동하세요.</p></div>
-                                    <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100"><h3 className="font-bold mb-2 flex items-center"><HeartIcon className="w-5 h-5 mr-2 text-rose-500" /> 심폐소생술</h3><p className="text-xs text-gray-600">환자 가슴 중앙을 100~120회 속도로 강하게 압박하세요.</p></div>
-                                </div>
-                            )}
-                        </main>
-
-                        <nav className="bg-white border-t border-gray-100 pb-safe pt-2 pb-4 px-2 relative z-20 shadow-[0_-10px_20px_rgba(0,0,0,0.02)]">
-                            <div className="flex justify-around items-center">
-                                <button onClick={() => setActiveTab('home')} className={`flex flex-col items-center space-y-1 w-full p-1 ${activeTab === 'home' ? 'text-[#0f285c]' : 'text-gray-400'}`}><Home className="w-6 h-6" /><span className="text-[10px] font-bold">홈</span></button>
-                                <button onClick={() => window.open('http://safe.m119.go.kr/', '_blank')} className="flex flex-col items-center space-y-1 w-full p-1 text-gray-400 hover:text-[#0f285c]"><Video className="w-6 h-6" /><span className="text-[10px] font-bold">현장지원</span></button>
-                                <button onClick={() => setActiveTab('safety')} className={`flex flex-col items-center space-y-1 w-full p-1 ${activeTab === 'safety' ? 'text-[#0f285c]' : 'text-gray-400'}`}><BookOpen className="w-6 h-6" /><span className="text-[10px] font-bold">안전수칙</span></button>
-                                <button onClick={() => setActiveTab('tv')} className={`flex flex-col items-center space-y-1 w-full p-1 ${activeTab === 'tv' ? 'text-[#e41e26]' : 'text-gray-400'}`}><Youtube className="w-6 h-6" /><span className="text-[10px] font-bold">소방TV</span></button>
-                            </div>
-                        </nav>
-                    </div>
+        {/* Dynamic Nav View Stage */}
+        <main className="flex-1 overflow-y-auto hide-scrollbar pb-6 bg-slate-50/70" id="main-content-scroll">
+          
+          {activeTab === 'home' && (
+            <div className="animate-fade-in space-y-4">
+              
+              {/* Dynamic Welcome Billboard */}
+              <div className="bg-gradient-to-r from-[#0f285c] via-[#153472] to-[#0f285c] px-4.5 py-5.5 text-white shadow-inner relative overflow-hidden">
+                <div className="absolute right-[-10px] bottom-[-20px] opacity-10 pointer-events-none transform rotate-12">
+                  <Flame className="w-32 h-32 text-white" />
                 </div>
-            );
-        }
+                <div className="flex justify-between items-start mb-2">
+                  <span className="text-[8px] font-extrabold uppercase bg-red-600 px-2 py-0.5 rounded text-white tracking-widest inline-block">
+                    Incheon Safe Desk 2026
+                  </span>
+                  <span className="text-[8.5px] font-black text-blue-200 bg-white/10 px-2 py-0.5 rounded font-mono">
+                    {formatDateString(currentTime)}
+                  </span>
+                </div>
+                <h2 className="text-sm font-black tracking-tight leading-snug">
+                  생명과 신속한 구조가 최우선,<br />인천소방본부 리얼타임 관제
+                </h2>
+                <div className="flex items-center space-x-1.5 mt-3 text-[9px] text-white bg-red-600/90 py-1.5 px-2.5 rounded-lg w-fit font-mono font-bold animate-pulse">
+                  <Clock className="w-3.5 h-3.5" />
+                  <span>실시간 현황: {formatTimeString(currentTime)}</span>
+                </div>
+              </div>
 
-        const root = createRoot(document.getElementById('root'));
-        root.render(<IncheonFireApp />);
-    </script>
-</body>
-</html>
+              {/* District Navigator Buttons */}
+              <section className="px-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-black text-gray-800 tracking-tight flex items-center">
+                    <span className="w-1.5 h-3 bg-[#e41e26] mr-1.5 rounded-sm"></span>
+                    관할 행정구역 선택
+                  </h3>
+                  <span className="text-[9px] text-gray-400 font-bold font-mono">Total {regionStats.length} Areas</span>
+                </div>
+
+                <div className="grid grid-cols-4 gap-1.5">
+                  {/* "all" general selection button */}
+                  <button 
+                    onClick={() => setSelectedRegionId('all')} 
+                    className={`py-2 text-[10px] font-extrabold border rounded-xl transition-all ${
+                      selectedRegionId === 'all' 
+                        ? 'border-[#0f285c] text-white bg-gradient-to-b from-[#153472] to-[#0f285c] shadow-md scale-105' 
+                        : 'border-slate-200 text-gray-600 bg-white hover:bg-slate-50'
+                    }`}
+                    id="btn-region-all"
+                  >
+                    인천 전체
+                  </button>
+                  {regionStats.map((region) => (
+                    <button 
+                      key={region.id} 
+                      onClick={() => setSelectedRegionId(region.id)} 
+                      className={`py-2 text-[10px] font-extrabold border rounded-xl transition-all truncate px-1 ${
+                        selectedRegionId === region.id 
+                          ? 'border-[#0f285c] text-white bg-gradient-to-b from-[#153472] to-[#0f285c] shadow-md scale-105' 
+                          : 'border-slate-200 text-gray-600 bg-white hover:bg-slate-50'
+                      }`}
+                      id={`btn-region-${region.id}`}
+                    >
+                      {region.name}
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              {/* Dynamic Numerical Statistics Card */}
+              <section className="px-4">
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+                  <div className="bg-slate-50 px-4 py-2.5 border-b border-slate-100 flex justify-between items-center">
+                    <h4 className="text-xs font-black text-slate-800 flex items-center">
+                      <span className="w-1 h-3 bg-[#0f285c] mr-1.5 rounded-full inline-block"></span>
+                      {selectedRegionId === 'all' ? '인천광역시 종합 출동 지표' : `${currentRegionContext.name} 출동 현황`}
+                    </h4>
+                    <span className="text-[8px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full font-extrabold border border-emerald-200">인천소방 실시간</span>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2.5 p-3.5 bg-white">
+                    <div className="bg-red-50 p-3 rounded-xl border border-red-100 text-center flex flex-col justify-between shadow-xs transition-all hover:scale-102">
+                      <div className="text-red-650 font-black text-2xl font-mono tracking-tight">{currentRegionContext.fire}</div>
+                      <div className="text-[9.5px] font-extrabold text-red-800 mt-0.5 flex items-center justify-center space-x-0.5">
+                        <Flame className="w-3 h-3 inline text-red-600 animate-pulse" />
+                        <span>화재진화</span>
+                      </div>
+                    </div>
+
+                    <div className="bg-amber-50 p-3 rounded-xl border border-amber-100 text-center flex flex-col justify-between shadow-xs transition-all hover:scale-102">
+                      <div className="text-amber-650 font-black text-2xl font-mono tracking-tight">{currentRegionContext.rescue}</div>
+                      <div className="text-[9.5px] font-extrabold text-amber-800 mt-0.5 flex items-center justify-center space-x-0.5">
+                        <Activity className="w-3 h-3 inline text-amber-600" />
+                        <span>인명구조</span>
+                      </div>
+                    </div>
+
+                    <div className="bg-blue-50 p-3 rounded-xl border border-blue-100 text-center flex flex-col justify-between shadow-xs transition-all hover:scale-102">
+                      <div className="text-blue-650 font-black text-2xl font-mono tracking-tight">{currentRegionContext.ems}</div>
+                      <div className="text-[9.5px] font-extrabold text-blue-800 mt-0.5 flex items-center justify-center space-x-0.5">
+                        <Heart className="w-3 h-3 inline text-blue-600" />
+                        <span>응급구급</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Representative Phone Dispatch Connection */}
+                  <div className="bg-slate-50/50 p-2.5 border-t border-slate-100 flex items-center justify-between text-[10px] px-4 font-semibold text-slate-600">
+                    <span className="flex items-center">
+                      <PhoneCall className="w-3.5 h-3.5 mr-1 text-[#0f285c]" />
+                      관할 소방서 연락망:
+                    </span>
+                    <span className="font-mono text-[#0f285c] font-bold">{currentRegionContext.phone}</span>
+                  </div>
+                </div>
+              </section>
+
+              {/* Live Incident Control Desk Feed */}
+              <section className="px-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-black text-gray-800 tracking-tight flex items-center">
+                    <span className="w-1.5 h-3 bg-[#e41e26] mr-1.5 rounded-sm"></span>
+                    실시간 사고 분석 흐름반
+                  </h3>
+                  <span className="text-[9px] bg-red-50 text-red-600 font-bold py-0.5 px-2 rounded-full border border-red-150">
+                    속보 피드
+                  </span>
+                </div>
+
+                {/* Filter and Search Panel */}
+                <div className="bg-white border border-slate-100 rounded-xl p-3 shadow-xs space-y-2.5">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                    <input 
+                      type="text" 
+                      placeholder="사건명, 동 지명, 장소 키워드 검색..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-8 pr-3 py-2 text-[10px] font-semibold text-slate-800 focus:outline-none focus:ring-1 focus:ring-[#0f285c]/40"
+                      id="search-incident-input"
+                    />
+                  </div>
+
+                  {/* Crisis Category type tags filter */}
+                  <div className="flex items-center space-x-1.5">
+                    <button 
+                      onClick={() => setFilterType('all')}
+                      className={`px-3 py-1 text-[9px] font-extrabold rounded-md transition-all ${
+                        filterType === 'all' 
+                          ? 'bg-[#0f285c] text-white' 
+                          : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                      }`}
+                    >
+                      전체 분류
+                    </button>
+                    <button 
+                      onClick={() => setFilterType('fire')}
+                      className={`px-3 py-1 text-[9px] font-extrabold rounded-md transition-all ${
+                        filterType === 'fire' 
+                          ? 'bg-red-600 text-white' 
+                          : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                      }`}
+                    >
+                      화재
+                    </button>
+                    <button 
+                      onClick={() => setFilterType('rescue')}
+                      className={`px-3 py-1 text-[9px] font-extrabold rounded-md transition-all ${
+                        filterType === 'rescue' 
+                          ? 'bg-amber-600 text-white' 
+                          : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                      }`}
+                    >
+                      구조
+                    </button>
+                    <button 
+                      onClick={() => setFilterType('ems')}
+                      className={`px-3 py-1 text-[9px] font-extrabold rounded-md transition-all ${
+                        filterType === 'ems' 
+                          ? 'bg-blue-600 text-white' 
+                          : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                      }`}
+                    >
+                      구급
+                    </button>
+                  </div>
+                </div>
+
+                {/* Feed Cards listing */}
+                <div className="space-y-2">
+                  {filteredIncidents.length === 0 ? (
+                    <div className="bg-white border rounded-xl p-6 text-center text-gray-400">
+                      <AlertCircle className="w-6 h-6 mx-auto mb-1.5 text-gray-300" />
+                      <p className="text-[10px] font-bold">일치하는 실시간 출동 내역이 없습니다.</p>
+                    </div>
+                  ) : (
+                    filteredIncidents.map((inc) => (
+                      <div 
+                        key={inc.id} 
+                        className="bg-white rounded-xl border border-slate-105 p-3.5 shadow-xs space-y-2 hover:shadow-sm transition-shadow animate-fade-in"
+                        id={`incident-item-${inc.id}`}
+                      >
+                        <div className="flex justify-between items-start">
+                          <div className="flex items-center space-x-1.5">
+                            <span className={`w-1.5 h-1.5 rounded-full ${
+                              inc.type === 'fire' ? 'bg-red-600' : inc.type === 'rescue' ? 'bg-amber-500' : 'bg-blue-400'
+                            }`}></span>
+                            <span className="text-[9px] font-black text-gray-400 uppercase">
+                              {inc.type === 'fire' ? '화재진화' : inc.type === 'rescue' ? '구조구호' : '응급구급'}
+                            </span>
+                            <span className="text-[9px] bg-slate-100 text-slate-500 font-bold px-1.5 py-0.5 rounded">
+                              {inc.regionName}
+                            </span>
+                          </div>
+                          
+                          {/* Live Dispatch Badge status */}
+                          <span className={`text-[8.5px] font-black px-2 py-0.5 rounded-full ${
+                            inc.status === '출동중' 
+                              ? 'bg-red-50 text-red-600 border border-red-150 animate-pulse'
+                              : inc.status === '진합중'
+                              ? 'bg-amber-50 text-amber-700 border border-amber-150'
+                              : 'bg-slate-100 text-slate-500 border border-slate-200'
+                          }`}>
+                            {inc.status}
+                          </span>
+                        </div>
+
+                        <div>
+                          <h4 className="text-[11px] font-black text-gray-800 leading-snug">{inc.title}</h4>
+                          <p className="text-[9.5px] text-gray-500 leading-relaxed mt-1">{inc.description}</p>
+                        </div>
+
+                        <div className="pt-2 border-t border-slate-50 flex justify-between items-center text-[9px] text-gray-400 font-bold">
+                          <span>📍 {inc.location}</span>
+                          <span className="font-mono text-slate-500">{inc.time}</span>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </section>
+
+              {/* Call-to-Action Buttons */}
+              <section className="px-4 pt-1">
+                <a 
+                  href="https://www.incheon.go.kr/119/NE030201" 
+                  target="_blank" 
+                  rel="noreferrer"
+                  className="w-full bg-[#0f285c] hover:bg-[#0a1b3f] text-white py-4 rounded-xl font-bold transition-colors flex items-center justify-center text-xs shadow-sm group"
+                  id="btn-link-daily-reports"
+                >
+                  인천 일일종합상황보고 전문 보기 
+                  <ChevronRight className="w-3.5 h-3.5 ml-1 transition-transform group-hover:translate-x-0.5" />
+                </a>
+              </section>
+            </div>
+          )}
+
+          {activeTab === 'support' && (
+            <FieldSupport onAddIncident={handleAddNewIncident} />
+          )}
+
+          {activeTab === 'safety' && (
+            <div className="animate-fade-in space-y-4">
+              
+              {/* Embed the beautiful live CPR training manager */}
+              <CPRManager />
+
+              {/* Beautiful expandable Safety Guides */}
+              <section className="px-4 pb-4">
+                <div className="mb-3.5 flex items-center">
+                  <span className="w-1.5 h-4 bg-[#0f285c] mr-2 rounded-sm"></span>
+                  <h3 className="text-xs font-black text-gray-800">생활 행동 요령 가이드북</h3>
+                </div>
+
+                <div className="space-y-3">
+                  {SAFETY_QUICK_GUIDES.map((guide) => (
+                    <div 
+                      key={guide.id}
+                      className="bg-white border border-slate-100 rounded-2xl p-4 shadow-xs"
+                      id={`safety-guide-card-${guide.id}`}
+                    >
+                      <span className={`text-[8px] font-black px-2 py-0.5 rounded-md uppercase tracking-wider inline-block mb-1.5 ${
+                        guide.category === 'fire' 
+                          ? 'bg-red-50 text-red-600' 
+                          : guide.category === 'earthquake' 
+                          ? 'bg-amber-50 text-amber-700' 
+                          : 'bg-emerald-50 text-emerald-700'
+                      }`}>
+                        {guide.category === 'fire' ? '화재 대처' : guide.category === 'earthquake' ? '지진 진동' : '구조 CPR'}
+                      </span>
+
+                      <h4 className="font-extrabold text-[#0a1b3f] text-xs mb-1">{guide.title}</h4>
+                      <p className="text-[10px] text-gray-400 font-semibold mb-3 leading-relaxed">{guide.description}</p>
+
+                      <ul className="space-y-2">
+                        {guide.steps.map((step, sIdx) => {
+                          const [stepTitle, stepBody] = step.split(':');
+                          return (
+                            <li key={sIdx} className="text-[10px] text-gray-650 flex items-start space-x-1.5 leading-relaxed">
+                              <span className="font-mono text-[#0f285c] font-black">{sIdx + 1}.</span>
+                              <div>
+                                <span className="font-extrabold text-gray-800">{stepTitle}</span>
+                                {stepBody && <span className="text-gray-500 font-medium">{stepBody}</span>}
+                              </div>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            </div>
+          )}
+
+          {activeTab === 'quiz' && (
+            <div className="animate-fade-in space-y-4">
+              
+              {/* Embedded educational Fire TV campaign block */}
+              <section className="px-4 pt-4">
+                <div className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm space-y-3.5">
+                  <div>
+                    <h3 className="font-extrabold text-[#0a1b3f] text-sm flex items-center">
+                      <TvIcon className="w-4 h-4 text-red-600 mr-1 animate-pulse" />
+                      인천소방TV 안전 교육 방송
+                    </h3>
+                    <p className="text-[10px] text-gray-500 mt-0.5">안전 의식이 미래를 바꿉니다. 소방본부 추천 동영상 강의와 비주얼 요령을 학습해보세요.</p>
+                  </div>
+
+                  {/* Mock Video Campaign */}
+                  <div className="bg-slate-900 rounded-xl overflow-hidden relative shadow-inner aspect-video flex flex-col justify-between p-3 border border-slate-800">
+                    <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1516549655169-df83a0774514?auto=format&fit=crop&w=600&q=80')] bg-cover bg-center opacity-30 select-none pointer-events-none"></div>
+                    
+                    <span className="text-[8px] font-black px-2 py-0.5 bg-red-600 text-white rounded w-fit relative z-10">
+                      인기 캠페인
+                    </span>
+
+                    <div className="flex flex-col items-center justify-center py-7 relative z-10">
+                      <button 
+                        onClick={() => window.open('https://www.youtube.com/results?search_query=인천소방본부', '_blank')}
+                        className="w-12 h-12 rounded-full bg-white/20 hover:bg-[#e41e26] text-white flex items-center justify-center border-2 border-white/60 hover:scale-105 active:scale-95 transition-all shadow-md group"
+                        title="동영상 아카이브로 재생"
+                        id="btn-play-youtube-campaign"
+                      >
+                        <PlayCircle className="w-8 h-8 fill-current text-white" />
+                      </button>
+                    </div>
+
+                    <div className="flex justify-between items-center text-white relative z-10">
+                      <span className="text-[10px] font-bold truncate pr-3">가정용 소화기 점검 주기 및 방출 관리법 [인천소방]</span>
+                      <span className="text-[8px] font-bold text-gray-300 whitespace-nowrap">04:32</span>
+                    </div>
+                  </div>
+
+                  <button 
+                    onClick={() => window.open('https://www.youtube.com/@인천소방본부', '_blank')}
+                    className="w-full bg-slate-100 hover:bg-slate-200 text-gray-700 py-2.5 rounded-xl font-black transition-colors flex items-center justify-center text-[10px]"
+                    id="btn-link-youtube-archive"
+                  >
+                    공식 인천소방 TV 유튜브 아카이브 바로가기
+                  </button>
+                </div>
+              </section>
+
+              {/* Interactive Fire safety Quiz Goldenbell element */}
+              <SafetyQuiz />
+            </div>
+          )}
+
+        </main>
+
+        {/* Desktop Interface Controller / Navigation bar */}
+        <nav className="bg-white border-t border-slate-150 pb-safe pt-2.5 pb-3 px-1 hover:shadow-md transition-shadow relative z-20 shrink-0 select-none">
+          <div className="flex justify-around items-center">
+            
+            <button 
+              onClick={() => setActiveTab('home')} 
+              className={`flex flex-col items-center space-y-1 w-full text-center py-1 border-none focus:outline-none transition-colors ${
+                activeTab === 'home' ? 'text-[#0f285c]' : 'text-gray-400 hover:text-gray-600'
+              }`}
+              id="tab-home"
+            >
+              <HomeIcon className="w-5.5 h-5.5" />
+              <span className="text-[10px] font-black tracking-tight">홈상황판</span>
+            </button>
+
+            <button 
+              onClick={() => setActiveTab('support')} 
+              className={`flex flex-col items-center space-y-1 w-full text-center py-1 border-none focus:outline-none transition-colors ${
+                activeTab === 'support' ? 'text-[#e41e26]' : 'text-gray-400 hover:text-gray-600'
+              }`}
+              id="tab-support"
+            >
+              <VideoIcon className="w-5.5 h-5.5" />
+              <span className="text-[10px] font-black tracking-tight">현장지원</span>
+            </button>
+
+            <button 
+              onClick={() => setActiveTab('safety')} 
+              className={`flex flex-col items-center space-y-1 w-full text-center py-1 border-none focus:outline-none transition-colors ${
+                activeTab === 'safety' ? 'text-[#0f285c]' : 'text-gray-400 hover:text-gray-600'
+              }`}
+              id="tab-safety"
+            >
+              <BookOpenIcon className="w-5.5 h-5.5" />
+              <span className="text-[10px] font-black tracking-tight">안전수칙</span>
+            </button>
+
+            <button 
+              onClick={() => setActiveTab('quiz')} 
+              className={`flex flex-col items-center space-y-1 w-full text-center py-1 border-none focus:outline-none transition-colors ${
+                activeTab === 'quiz' ? 'text-[#e41e26]' : 'text-gray-400 hover:text-gray-600'
+              }`}
+              id="tab-quiz"
+            >
+              <TvIcon className="w-5.5 h-5.5" />
+              <span className="text-[10px] font-black tracking-tight">소방TV·퀴즈</span>
+            </button>
+
+          </div>
+        </nav>
+      </div>
+    </div>
+  );
+}
