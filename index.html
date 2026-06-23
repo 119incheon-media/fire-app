@@ -1,0 +1,260 @@
+import React, { useState } from 'react';
+import {
+  Home,
+  Video,
+  BookOpen,
+  Youtube,
+  Menu,
+  ChevronRight
+} from 'lucide-react';
+
+// 1. 인천 지역별 출동 현황 가상 데이터 (지도 제거, 데이터만 유지)
+const INCHEON_REGIONS = [
+  { id: 'all', name: '전체', fire: 0, rescue: 0, ems: 0 },
+  { id: 'ganghwa', name: '강화군', fire: 2, rescue: 4, ems: 18 },
+  { id: 'seo', name: '서구', fire: 4, rescue: 15, ems: 62 },
+  { id: 'gyeyang', name: '계양구', fire: 1, rescue: 7, ems: 31 },
+  { id: 'bupyeong', name: '부평구', fire: 2, rescue: 10, ems: 48 },
+  { id: 'namdong', name: '남동구', fire: 3, rescue: 12, ems: 55 },
+  { id: 'michuhol', name: '미추홀구', fire: 2, rescue: 8, ems: 42 },
+  { id: 'yeonsu', name: '연수구', fire: 1, rescue: 6, ems: 38 },
+  { id: 'jung', name: '중구', fire: 0, rescue: 2, ems: 15 },
+  { id: 'jung-yeongjong', name: '중구(영종)', fire: 1, rescue: 5, ems: 24 },
+  { id: 'ongjin', name: '옹진군', fire: 0, rescue: 1, ems: 5 },
+];
+
+export default function IncheonFireApp() {
+  const [activeTab, setActiveTab] = useState('home');
+  const [selectedRegionId, setSelectedRegionId] = useState('all');
+
+  // 총계 계산 로직
+  const totalStats = INCHEON_REGIONS.reduce(
+    (acc, region) => {
+      if (region.id !== 'all') {
+        acc.fire += region.fire;
+        acc.rescue += region.rescue;
+        acc.ems += region.ems;
+      }
+      return acc;
+    },
+    { fire: 0, rescue: 0, ems: 0 }
+  );
+
+  // 현재 선택된 지역 데이터 파싱
+  const currentRegionData = selectedRegionId === 'all' 
+    ? { name: '전체', ...totalStats }
+    : INCHEON_REGIONS.find(r => r.id === selectedRegionId);
+
+  return (
+    // 전체 배경: 소방관 화재 진압 일러스트/사진 적용 및 세련된 그라데이션 오버레이 추가
+    <div 
+      className="min-h-screen flex items-center justify-center p-0 sm:p-6 font-sans relative bg-gray-900"
+      style={{
+        backgroundImage: `url('https://images.unsplash.com/photo-1627503460670-65239e2d3122?auto=format&fit=crop&w=2000&q=80')`,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundAttachment: 'fixed'
+      }}
+    >
+      {/* 배경 어둡게/그라데이션 오버레이 처리 (가독성 향상 및 분위기 극대화) */}
+      <div className="absolute inset-0 bg-black/50 bg-gradient-to-br from-[#0f285c]/80 via-black/40 to-[#e41e26]/40 backdrop-blur-[2px]"></div>
+
+      {/* 모바일 스마트폰 프레임 (세련된 글래스모피즘 반투명 효과 적용) */}
+      <div className="w-full h-screen sm:h-[842px] max-w-[390px] bg-white/95 backdrop-blur-2xl flex flex-col relative sm:rounded-[2.5rem] sm:border-[6px] border-gray-800 shadow-[0_20px_60px_rgba(0,0,0,0.7)] overflow-hidden ring-1 ring-white/20 z-10">
+        
+        {/* 글로벌 애니메이션 및 스크롤바 숨김 스타일 */}
+        <style>{`
+          @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(5px); }
+            to { opacity: 1; transform: translateY(0); }
+          }
+          .animate-fade-in {
+            animation: fadeIn 0.3s ease-out forwards;
+          }
+          .hide-scrollbar::-webkit-scrollbar {
+            display: none;
+          }
+          .hide-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+          }
+        `}</style>
+
+        {/* 상단 시스템 상태바 영역 (가상 목업용) */}
+        <div className="hidden sm:flex h-6 w-full bg-transparent justify-between items-center px-6 pt-2 pb-1 text-[10px] font-bold text-gray-800 z-20">
+          <span>9:41</span>
+          <div className="flex space-x-1 items-center">
+            <div className="w-4 h-2.5 rounded-sm border border-gray-800 relative">
+               <div className="absolute inset-0.5 bg-gray-800 rounded-[1px]"></div>
+            </div>
+          </div>
+        </div>
+
+        {/* 앱 상단 헤더 */}
+        <header className="bg-white/80 backdrop-blur-md px-4 py-3 flex items-center justify-between relative z-10 border-b border-gray-100">
+          <div className="flex items-center space-x-2">
+            <img 
+              src={encodeURI("인천소방본부(심벌마크).png")} 
+              alt="인천소방 로고" 
+              className="w-8 h-8 object-contain drop-shadow-sm" 
+              onError={(e) => {
+                e.target.style.display = 'none';
+              }}
+            />
+            <h1 className="text-lg font-black text-gray-900 tracking-tight">인천소방본부</h1>
+          </div>
+          <button className="p-1.5 rounded-full hover:bg-gray-100 transition-colors">
+            <Menu className="w-6 h-6 text-gray-800" />
+          </button>
+        </header>
+
+        {/* 메인 콘텐츠 영역 (스크롤 가능) */}
+        <main className="flex-1 overflow-y-auto hide-scrollbar bg-gray-50/50 pb-6">
+          {activeTab === 'home' && (
+            <div className="animate-fade-in">
+              
+              {/* 홈 메인 배너 */}
+              <div className="bg-gradient-to-r from-[#0f285c] via-[#1a408b] to-[#0f285c] px-5 py-7 text-white shadow-inner relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-32 h-32 bg-white opacity-10 rounded-full blur-2xl transform translate-x-10 -translate-y-10"></div>
+                <h2 className="text-xl font-black mb-1.5 tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-white to-blue-100 relative z-10">
+                  인천시민의 안전을 지킵니다
+                </h2>
+                <p className="text-xs text-blue-200 font-medium tracking-wide relative z-10">
+                  365일 24시간 깨어있는 인천소방
+                </p>
+              </div>
+
+              {/* 통계 및 버튼 섹션 */}
+              <section className="px-4 py-6 mt-[-15px] bg-white rounded-t-3xl relative shadow-[0_-4px_15px_rgba(0,0,0,0.05)] flex flex-col space-y-6">
+                
+                {/* 타이틀 및 안내 */}
+                <div>
+                  <h2 className="text-lg font-black text-gray-900 tracking-tight flex items-center">
+                    <span className="w-1.5 h-4 bg-[#e41e26] mr-2 rounded-sm shadow-sm"></span>
+                    인천 재난현황
+                  </h2>
+                  <p className="text-[11px] text-gray-500 mt-1 ml-3.5 font-medium">
+                    궁금하신 지역 버튼을 탭하여 통계를 확인하세요.
+                  </p>
+                </div>
+
+                {/* 지역 버튼 그리드 */}
+                <div className="grid grid-cols-4 gap-2">
+                  {INCHEON_REGIONS.map((region) => (
+                    <button
+                      key={region.id}
+                      onClick={() => setSelectedRegionId(region.id)}
+                      className={`py-2.5 text-[11px] font-bold border rounded-xl transition-all duration-200 ${
+                        selectedRegionId === region.id
+                          ? 'border-[#0f285c] text-white bg-gradient-to-b from-[#1a408b] to-[#0f285c] shadow-md transform scale-105'
+                          : 'border-gray-200 text-gray-600 bg-white hover:bg-gray-50 active:scale-95'
+                      }`}
+                    >
+                      {region.name}
+                    </button>
+                  ))}
+                </div>
+
+                {/* 통계 테이블 영역 */}
+                <div className="w-full pt-2">
+                  <div className="bg-gray-50 rounded-2xl border border-gray-100 overflow-hidden shadow-sm">
+                    <h3 className="text-sm font-black text-center text-gray-800 py-3 bg-gray-100/80 border-b border-gray-200">
+                      {currentRegionData.name === '전체' ? '인천 전체 통계' : `${currentRegionData.name} 통계`}
+                    </h3>
+                    
+                    <table className="w-full text-center border-collapse bg-white">
+                      <thead>
+                        <tr className="border-b border-gray-100">
+                          <th className="py-2.5 font-bold text-gray-500 w-1/2 text-xs border-r border-gray-100">구분</th>
+                          <th className="py-2.5 font-bold text-gray-500 w-1/2 text-xs">일계 (건)</th>
+                        </tr>
+                      </thead>
+                      <tbody className="text-gray-900 font-black text-lg">
+                        <tr className="border-b border-gray-50">
+                          <td className="py-3.5 border-r border-gray-50 text-sm font-medium text-gray-700">화재출동</td>
+                          <td className="py-3.5 text-[#e41e26]">{currentRegionData.fire}</td>
+                        </tr>
+                        <tr className="border-b border-gray-50">
+                          <td className="py-3.5 border-r border-gray-50 text-sm font-medium text-gray-700">구조출동</td>
+                          <td className="py-3.5 text-orange-500">{currentRegionData.rescue}</td>
+                        </tr>
+                        <tr>
+                          <td className="py-3.5 border-r border-gray-50 text-sm font-medium text-gray-700">구급출동</td>
+                          <td className="py-3.5 text-[#1a408b]">{currentRegionData.ems}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* 일일종합상황 보기 버튼 */}
+                <button 
+                  onClick={() => window.open('https://www.incheon.go.kr/119/NE030201', '_blank')}
+                  className="w-full bg-[#0f285c] hover:bg-[#0a1b3f] text-white py-4 rounded-xl font-bold shadow-[0_4px_12px_rgba(15,40,92,0.2)] transition-colors flex items-center justify-center mt-2 text-sm group"
+                >
+                  일일종합상황 상세 보기 
+                  <ChevronRight className="w-4 h-4 ml-1 opacity-70 group-hover:opacity-100 group-hover:translate-x-1 transition-all" />
+                </button>
+              </section>
+            </div>
+          )}
+
+          {/* 현장영상 탭은 외부 링크로 대체되므로 실제 화면은 렌더링되지 않습니다. */}
+          
+          {activeTab === 'safety' && (
+            <div className="flex flex-col items-center justify-center h-full min-h-[400px] text-gray-500 animate-fade-in p-6 text-center">
+              <BookOpen className="w-16 h-16 mb-4 text-gray-300" />
+              <p className="text-lg font-bold text-gray-800">안전수칙 콘텐츠 준비 중</p>
+              <p className="text-xs mt-2 text-gray-600">화재, 지진 대피 요령 및 응급처치 가이드를 제공합니다.</p>
+            </div>
+          )}
+
+          {activeTab === 'tv' && (
+            <div className="flex flex-col items-center justify-center h-full min-h-[400px] text-gray-500 animate-fade-in p-6 text-center">
+              <Youtube className="w-16 h-16 mb-4 text-[#e41e26] opacity-70" />
+              <p className="text-lg font-bold text-gray-800">소방TV 연동 준비 중</p>
+              <p className="text-xs mt-2 text-gray-600">인천소방 공식 유튜브의 최신 안전 교육 영상을 시청할 수 있습니다.</p>
+            </div>
+          )}
+        </main>
+
+        {/* 하단 탭 네비게이션 */}
+        <nav className="bg-white border-t border-gray-100 pb-safe pt-2 pb-4 px-2 relative z-20 shadow-[0_-10px_20px_rgba(0,0,0,0.02)]">
+          <div className="flex justify-around items-center">
+            <button 
+              onClick={() => setActiveTab('home')} 
+              className={`flex flex-col items-center space-y-1 w-full p-1 transition-colors ${activeTab === 'home' ? 'text-[#0f285c]' : 'text-gray-400'}`}
+            >
+              <Home className="w-6 h-6" />
+              <span className="text-[10px] font-bold">홈</span>
+            </button>
+            
+            {/* 현장영상 버튼 (외부 링크 새 창 열기) */}
+            <button 
+              onClick={() => window.open('https://icn119.co.kr/join/VFsxySmxH0?lang=ko', '_blank')} 
+              className="flex flex-col items-center space-y-1 w-full p-1 transition-colors text-gray-400 hover:text-[#0f285c]"
+            >
+              <Video className="w-6 h-6" />
+              <span className="text-[10px] font-bold">현장영상</span>
+            </button>
+            
+            <button 
+              onClick={() => setActiveTab('safety')} 
+              className={`flex flex-col items-center space-y-1 w-full p-1 transition-colors ${activeTab === 'safety' ? 'text-[#0f285c]' : 'text-gray-400'}`}
+            >
+              <BookOpen className="w-6 h-6" />
+              <span className="text-[10px] font-bold">안전수칙</span>
+            </button>
+            <button 
+              onClick={() => setActiveTab('tv')} 
+              className={`flex flex-col items-center space-y-1 w-full p-1 transition-colors ${activeTab === 'tv' ? 'text-[#e41e26]' : 'text-gray-400'}`}
+            >
+              <Youtube className="w-6 h-6" />
+              <span className="text-[10px] font-bold">소방TV</span>
+            </button>
+          </div>
+        </nav>
+      </div>
+    </div>
+  );
+}
